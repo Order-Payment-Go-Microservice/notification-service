@@ -1,0 +1,36 @@
+services:
+  notification-service:
+    build: .
+    ports:
+      - "9006:9005"
+      - "50052:50052"
+    environment:
+      - DB_HOST=postgres-notifications
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=notifications_db
+    depends_on:
+      - postgres-notifications
+    networks:
+      - messenger-network
+
+  postgres-notifications:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=notifications_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - notifications_db_data:/var/lib/postgresql/data
+    networks:
+      - messenger-network
+
+networks:
+  messenger-network:
+    external: true
+
+volumes:
+  notifications_db_data:
