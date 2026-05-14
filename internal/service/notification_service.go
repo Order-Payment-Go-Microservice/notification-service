@@ -2,8 +2,8 @@ package service
 
 import (
 	"log"
-	"notification-service/internal/model"
-	"notification-service/internal/repository"
+	"github.com/Order-Payment-Go-Microservice/notification-service/internal/model"
+	"github.com/Order-Payment-Go-Microservice/notification-service/internal/repository"
 	"time"
 
 	"github.com/google/uuid"

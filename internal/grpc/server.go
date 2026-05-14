@@ -3,8 +3,8 @@ package grpc
 import (
 	"context"
 	"log"
-	"notification-service/internal/service"
-	pb "notification-service/proto"
+	"github.com/Order-Payment-Go-Microservice/notification-service/internal/service"
+	pb "github.com/Order-Payment-Go-Microservice/notification-service/proto"
 
 	"github.com/google/uuid"
 )

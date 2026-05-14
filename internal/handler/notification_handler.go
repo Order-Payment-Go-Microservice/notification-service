@@ -2,7 +2,7 @@ package handler
 
 import (
 	"net/http"
-	"notification-service/internal/service"
+	"github.com/Order-Payment-Go-Microservice/notification-service/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

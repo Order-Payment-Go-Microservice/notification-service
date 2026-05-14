@@ -2,7 +2,7 @@ package repository
 
 import (
 	"database/sql"
-	"notification-service/internal/model"
+	"github.com/Order-Payment-Go-Microservice/notification-service/internal/model"
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
