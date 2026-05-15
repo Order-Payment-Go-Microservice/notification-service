@@ -1,21 +1,27 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+
 	"github.com/Order-Payment-Go-Microservice/notification-service/internal/config"
+	"github.com/Order-Payment-Go-Microservice/notification-service/internal/database"
 	internalGrpc "github.com/Order-Payment-Go-Microservice/notification-service/internal/grpc"
 	"github.com/Order-Payment-Go-Microservice/notification-service/internal/handler"
 	"github.com/Order-Payment-Go-Microservice/notification-service/internal/repository"
 	"github.com/Order-Payment-Go-Microservice/notification-service/internal/service"
-	pb "github.com/Order-Payment-Go-Microservice/notification-service/proto"
-	"time"
+	notificationv1 "github.com/Order-Payment-Go-Microservice/proto-generation/gen/notification/v1"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+	"github.com/nats-io/nats.go"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
-	"net"
 )
 
 func main() {
@@ -23,72 +29,93 @@ func main() {
 
 	dbAddr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName)
-	
-	var db *sql.DB
-	var err error
-	for i := 0; i < 5; i++ {
-		db, err = sql.Open("postgres", dbAddr)
-		if err == nil {
-			err = db.Ping()
-			if err == nil {
-				break
-			}
-		}
-		log.Printf("Waiting for database... attempt %d/5", i+1)
-		time.Sleep(2 * time.Second)
-	}
 
+	db, err := sql.Open("postgres", dbAddr)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
 
-	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS notifications (
-		id UUID PRIMARY KEY,
-		user_id UUID NOT NULL,
-		title VARCHAR(255),
-		message TEXT,
-		type VARCHAR(50),
-		is_read BOOLEAN DEFAULT FALSE,
-		created_at TIMESTAMP DEFAULT NOW()
-	);`)
+	if err := db.Ping(); err != nil {
+		log.Fatalf("Failed to ping database: %v", err)
+	}
+
+	if err := database.RunMigrations(db); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
+
+	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisURL})
+	if err := rdb.Ping(context.Background()).Err(); err != nil {
+		log.Printf("Redis connection failed: %v", err)
+	}
 
 	repo := repository.NewPostgresRepository(db)
-	svc := service.NewNotificationService(repo)
-	h := handler.NewNotificationHandler(svc)
+	notificationSvc := service.NewNotificationService(repo, rdb)
+	emailSvc := service.NewEmailService()
+	notificationHandler := handler.NewNotificationHandler(notificationSvc)
 
-	router := gin.Default()
+	nc, err := nats.Connect(cfg.NatsURL)
+	if err != nil {
+		log.Printf("NATS connection failed: %v", err)
+	} else {
+		defer nc.Close()
+		_, err = nc.Subscribe("notifications", func(m *nats.Msg) {
+			var data map[string]string
+			if err := json.Unmarshal(m.Data, &data); err != nil {
+				log.Printf("[NATS] invalid payload: %v", err)
+				return
+			}
+			log.Printf("[NATS Consumer] Received notification: %v", data)
 
-	router.GET("/health", h.HealthCheck)
-	router.GET("/notifications", h.GetNotifications)
-	router.POST("/notifications", h.CreateTestNotification)
-	router.PUT("/notifications/read/:id", h.MarkRead)
+			uID, err := uuid.Parse(data["user_id"])
+			if err != nil {
+				log.Printf("[NATS] invalid user_id: %v", err)
+				return
+			}
 
-	router.GET("/notifications/:id", func(c *gin.Context) { c.JSON(200, gin.H{"message": "GET single placeholder"}) })
-	router.DELETE("/notifications/:id", func(c *gin.Context) { c.JSON(200, gin.H{"message": "DELETE placeholder"}) })
-	router.POST("/notifications/email", func(c *gin.Context) { c.JSON(200, gin.H{"message": "POST email placeholder"}) })
-	router.POST("/notifications/push", func(c *gin.Context) { c.JSON(200, gin.H{"message": "POST push placeholder"}) })
-	router.POST("/notifications/sms", func(c *gin.Context) { c.JSON(200, gin.H{"message": "POST sms placeholder"}) })
-	router.GET("/templates", func(c *gin.Context) { c.JSON(200, gin.H{"message": "GET templates placeholder"}) })
-	router.POST("/templates", func(c *gin.Context) { c.JSON(200, gin.H{"message": "POST templates placeholder"}) })
-	router.GET("/preferences", func(c *gin.Context) { c.JSON(200, gin.H{"message": "GET preferences placeholder"}) })
-	router.PUT("/preferences", func(c *gin.Context) { c.JSON(200, gin.H{"message": "PUT preferences placeholder"}) })
+			nType := data["type"]
+			if nType == "" {
+				nType = "push"
+			}
+
+			if _, err := notificationSvc.CreateNotification(uID, data["title"], data["message"], nType); err != nil {
+				log.Printf("[NATS] create notification failed: %v", err)
+				return
+			}
+
+			if nType == "email" {
+				to := data["email"]
+				if to == "" {
+					to = "user@example.com"
+				}
+				_ = emailSvc.SendEmail(to, data["title"], data["message"])
+			}
+		})
+		if err != nil {
+			log.Printf("NATS subscribe failed: %v", err)
+		} else {
+			log.Println("NATS Consumer subscribed to 'notifications'")
+		}
+	}
 
 	go func() {
-		lis, err := net.Listen("tcp", ":" + cfg.GRPCPort)
+		lis, err := net.Listen("tcp", ":50052")
 		if err != nil {
-			log.Printf("Failed to listen for gRPC: %v", err)
-			return
+			log.Fatalf("failed to listen: %v", err)
 		}
 		s := grpc.NewServer()
-		grpcServer := internalGrpc.NewNotificationServer(svc)
-		pb.RegisterNotificationServiceServer(s, grpcServer)
-		
-		log.Printf("gRPC Notification Server starting on port %s...", cfg.GRPCPort)
+		notificationv1.RegisterNotificationServiceServer(s, internalGrpc.NewNotificationServer(notificationSvc))
+		log.Println("gRPC Notification Server starting on port 50052...")
 		if err := s.Serve(lis); err != nil {
-			log.Printf("Failed to serve gRPC: %v", err)
+			log.Fatalf("failed to serve: %v", err)
 		}
 	}()
+
+	router := gin.Default()
+	router.GET("/health", notificationHandler.HealthCheck)
+	router.GET("/notifications", notificationHandler.GetHistory)
+	router.POST("/notifications", notificationHandler.CreateNotification)
+	router.PATCH("/notifications/:id/read", notificationHandler.MarkRead)
 
 	log.Printf("Notification Service starting on port %s...", cfg.Port)
 	if err := router.Run(":" + cfg.Port); err != nil {

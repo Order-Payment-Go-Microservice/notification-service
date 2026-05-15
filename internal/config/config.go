@@ -1,7 +1,6 @@
 package config
 
 import (
-
 	"os"
 
 	"github.com/joho/godotenv"
@@ -9,16 +8,13 @@ import (
 
 type Config struct {
 	Port       string
-	GRPCPort   string
 	DBHost     string
 	DBPort     string
 	DBUser     string
 	DBPassword string
 	DBName     string
-	SMTPHost   string
-	SMTPPort   string
-	SMTPUser   string
-	SMTPPass   string
+	NatsURL    string
+	RedisURL   string
 }
 
 func LoadConfig() *Config {
@@ -26,22 +22,19 @@ func LoadConfig() *Config {
 
 	return &Config{
 		Port:       getEnv("PORT", "9005"),
-		GRPCPort:   getEnv("GRPC_PORT", "50052"),
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnv("DB_PORT", "5432"),
 		DBUser:     getEnv("DB_USER", "postgres"),
 		DBPassword: getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "notifications_db"),
-		SMTPHost:   getEnv("SMTP_HOST", "smtp.gmail.com"),
-		SMTPPort:   getEnv("SMTP_PORT", "587"),
-		SMTPUser:   getEnv("SMTP_USER", "test@gmail.com"),
-		SMTPPass:   getEnv("SMTP_PASSWORD", "password"),
+		NatsURL:    getEnv("NATS_URL", "nats://localhost:4222"),
+		RedisURL:   getEnv("REDIS_URL", "localhost:6379"),
 	}
 }
 
-func getEnv(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
 		return value
 	}
-	return defaultValue
+	return fallback
 }
