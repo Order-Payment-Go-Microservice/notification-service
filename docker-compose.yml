@@ -1,9 +1,26 @@
 services:
+  postgres-notifications:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: notifications_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - notifications_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d notifications_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   notification-service:
     build: .
     ports:
       - "9006:9005"
-      - "50052:50052"
+      - "50053:50052"
     environment:
       - DB_HOST=postgres-notifications
       - DB_PORT=5432
@@ -11,26 +28,8 @@ services:
       - DB_PASSWORD=postgres
       - DB_NAME=notifications_db
     depends_on:
-      - postgres-notifications
-    networks:
-      - messenger-network
-
-  postgres-notifications:
-    image: postgres:16-alpine
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=notifications_db
-    ports:
-      - "5434:5432"
-    volumes:
-      - notifications_db_data:/var/lib/postgresql/data
-    networks:
-      - messenger-network
-
-networks:
-  messenger-network:
-    external: true
+      postgres-notifications:
+        condition: service_healthy
 
 volumes:
   notifications_db_data:

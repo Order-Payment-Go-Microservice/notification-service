@@ -99,13 +99,14 @@ func main() {
 	}
 
 	go func() {
-		lis, err := net.Listen("tcp", ":50052")
+		grpcPort := cfg.GRPCPort
+		lis, err := net.Listen("tcp", ":"+grpcPort)
 		if err != nil {
 			log.Fatalf("failed to listen: %v", err)
 		}
 		s := grpc.NewServer()
 		notificationv1.RegisterNotificationServiceServer(s, internalGrpc.NewNotificationServer(notificationSvc))
-		log.Println("gRPC Notification Server starting on port 50052...")
+		log.Printf("gRPC Notification Server starting on port %s...", grpcPort)
 		if err := s.Serve(lis); err != nil {
 			log.Fatalf("failed to serve: %v", err)
 		}
